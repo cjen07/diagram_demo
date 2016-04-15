@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <style>
+
+      .diagram-node-location .diagram-node-content {
+        background: url(http://www.saltlakemailing.com/wp-content/uploads/2012/03/process_icon.png) no-repeat scroll center transparent;
+      }
+
+
+    </style>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title></title>
+    <script src="http://cdn.alloyui.com/3.0.1/aui/aui-min.js"></script>
+    <link href="http://cdn.alloyui.com/3.0.1/aui-css/css/bootstrap.min.css" rel="stylesheet"></link>
+</head>
+<body>
+    <div id="myDiagramContainer">
+      <div id="diagramBuilder" width=100></div>
+      <div id="flow chart editor"></div>
+      <button id="getJSON">Get JSON</button>
+    </div>
+    <script>
+
+
+    function click() {
+
+      var field = diagramBuilder.toJSON();
+      console.log(JSON.stringify(field));
+
+    }
+
+
+    YUI({ filter:'raw' }).use('aui-diagram-builder', function(Y) {
+
+
+          Y.DiagramNodeCustom = Y.Component.create({
+        NAME: 'diagram-node',
+
+        ATTRS: {
+            type: {
+                value: 'location'
+            },
+            Attr1: {
+                validator: Y.Lang.isString,
+                value: ''
+            },
+            Attr2: {
+                validator: Y.Lang.isString,
+                value: ''
+            }
+        },
+
+        EXTENDS: Y.DiagramNodeTask,
+
+        prototype: {
+
+              initializer: function () {
+                this.SERIALIZABLE_ATTRS.push('Attr1');
+                this.SERIALIZABLE_ATTRS.push('Attr2');
+              },
+
+
+            getPropertyModel: function () {
+                var instance = this;
+
+                var model = Y.DiagramNodeTask.superclass.getPropertyModel.apply(instance, arguments);
+
+                model.push({
+                    attributeName: 'Attr1',
+                    name: 'Attr1'
+                });
+                model.push({
+                    attributeName: 'Attr2',
+                    name: 'Attr2'
+                });
+
+                return model;
+            }
+        }
+    });
+
+    Y.DiagramBuilder.types['location'] = Y.DiagramNodeCustom;
+
+
+
+        var availableFields = [
+            {
+                iconClass: 'diagram-node-task-icon',
+                label: 'Location',
+                type: 'location'
+            }
+        ];
+
+/*       var CustomConnector = function() {
+      };
+
+      CustomConnector.ATTRS = {
+          testAttr: {
+              valueFn: function() {
+                  return 'test attr instance value';
+              }
+          }
+      };
+
+      CustomConnector.prototype.initializer = function() {
+          var instance = this;
+
+          instance.SERIALIZABLE_ATTRS.push('testAttr');
+      };
+
+      CustomConnector.prototype.getPropertyModel = function() {
+          var instance = this;
+
+          return [
+              {
+                  attributeName: 'testAttr',
+                  editor: new Y.TextCellEditor(),
+                  name: 'Test Attr'
+              }
+          ];
+      }; */
+
+      //Y.Base.mix(Y.Connector, [CustomConnector]);
+
+
+
+
+        var diagramBuilder = new Y.DiagramBuilder({
+            availableFields: availableFields,
+            boundingBox: '#diagramBuilder',
+            //connector: CustomConnector,
+        }).render();
+
+
+    Y.one('#getJSON').on(
+          'click',
+
+      function (event) {
+          console.log('JSON: ' + JSON.stringify(diagramBuilder.toJSON()));
+      });
+
+
+
+
+    });
+    </script>
+</body>
+</html>
