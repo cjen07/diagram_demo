@@ -5,7 +5,7 @@
     <style>
 
       .diagram-node-location .diagram-node-content {
-        background: url(http://www.saltlakemailing.com/wp-content/uploads/2012/03/process_icon.png) no-repeat scroll center transparent;
+        background: url(./task.png) no-repeat scroll center transparent;
       }
 
 
@@ -37,18 +37,19 @@
     YUI({ filter:'raw' }).use('aui-diagram-builder', function(Y) {
 
 
-          Y.DiagramNodeCustom = Y.Component.create({
+    Y.DiagramNodeCustom = Y.Component.create({
+
         NAME: 'diagram-node',
 
         ATTRS: {
             type: {
                 value: 'location'
             },
-            Attr1: {
+            invariant1: {
                 validator: Y.Lang.isString,
                 value: ''
             },
-            Attr2: {
+            invariant2: {
                 validator: Y.Lang.isString,
                 value: ''
             }
@@ -58,10 +59,20 @@
 
         prototype: {
 
-              initializer: function () {
-                this.SERIALIZABLE_ATTRS.push('Attr1');
-                this.SERIALIZABLE_ATTRS.push('Attr2');
-              },
+          initializer: function () {
+            this.SERIALIZABLE_ATTRS.push('invariant1');
+            this.SERIALIZABLE_ATTRS.push('invariant2');
+
+            var instance = this;
+
+            instance.on({
+              nameChange: instance._onNameChange,
+              invariant1Change: instance._onInvariant1Change,
+              invariant2Change: instance._onInvariant2Change
+            });
+
+
+          },
 
 
             getPropertyModel: function () {
@@ -69,17 +80,73 @@
 
                 var model = Y.DiagramNodeTask.superclass.getPropertyModel.apply(instance, arguments);
 
+                var pos = model.map(function(e){return e.name;}).indexOf("Description");
+
+                model.splice(pos, 1);
+
+
+                var pos = model.map(function(e){return e.name;}).indexOf("Type");
+
+                model.splice(pos, 1);
+
                 model.push({
-                    attributeName: 'Attr1',
-                    name: 'Attr1'
+                    attributeName: 'invariant1',
+                    name: 'Invariant1'
                 });
                 model.push({
-                    attributeName: 'Attr2',
-                    name: 'Attr2'
+                    attributeName: 'invariant2',
+                    name: 'Invariant2'
                 });
 
                 return model;
+            },
+
+          _afterRender: function() {
+            var instance = this;
+
+            instance.setStdModContent(Y.WidgetStdMod.BODY, '', Y.WidgetStdMod.AFTER);
+            instance._renderGraphic();
+            instance._renderControls();
+            instance._renderLabel();
+            instance._uiSetHighlighted(instance.get('highlighted'));
+          },
+
+          _renderLabel: function() {
+            var instance = this;
+
+            instance.labelNode = Y.Node.create(
+              Y.Lang.sub(instance.LABEL_TEMPLATE, {
+                label: (instance.get('name') + "<br>" + instance.get('invariant1') + "<br>" + instance.get('invariant2'))
+              })
+            );
+
+            //console.log(instance.labelNode.getHTML());
+
+            instance.get('contentBox').placeAfter(instance.labelNode);
+          },
+
+          _uiSetName: function(val) {
+            var instance = this;
+            var boundingBox = instance.get('boundingBox');
+
+            boundingBox.setAttribute('data-nodeId', Y.Escape.html(Y.DiagramNode.buildNodeId(val)));
+
+            if (instance.get('rendered')) {
+              instance.labelNode.setContent(val + "<br>" + instance.get('invariant1') + "<br>" + instance.get('invariant2'));
             }
+          },
+
+          _onInvariant1Change: function(event) {
+            var instance = this;
+            instance.labelNode.setContent(instance.get('name') + "<br>" + event.newVal + "<br>" + instance.get('invariant2'));
+          },
+
+          _onInvariant2Change: function(event) {
+            var instance = this;
+            instance.labelNode.setContent(instance.get('name') + "<br>" + instance.get('invariant1') + "<br>" + event.newVal);
+          }
+
+
         }
     });
 
@@ -92,16 +159,21 @@
                 iconClass: 'diagram-node-task-icon',
                 label: 'Location',
                 type: 'location'
+            },
+            {
+              iconClass: 'diagram-node-fork-icon',
+              label: 'Fork',
+              type: 'fork'
             }
         ];
 
-/*       var CustomConnector = function() {
+      var CustomConnector = function() {
       };
 
       CustomConnector.ATTRS = {
-          testAttr: {
+          guard: {
               valueFn: function() {
-                  return 'test attr instance value';
+                  return '';
               }
           }
       };
@@ -109,22 +181,77 @@
       CustomConnector.prototype.initializer = function() {
           var instance = this;
 
-          instance.SERIALIZABLE_ATTRS.push('testAttr');
+          if (instance.SERIALIZABLE_ATTRS.indexOf('guard') == -1)
+
+            instance.SERIALIZABLE_ATTRS.push('guard');
+
+          instance.after({
+            nameChange: instance._afterNameChange,
+            guardChange: instance._afterGuardChange,
+            p1Change: instance.draw,
+            p2Change: instance.draw,
+            selectedChange: instance._afterSelectedChange,
+            showNameChange: instance._afterShowNameChange,
+            visibleChange: instance._afterVisibleChange
+          });
+
+          instance._uiSetName(instance.get('name') + "<br>" + instance.get('guard'));
       };
+
+
+      CustomConnector.prototype._afterNameChange = function(event) {
+
+        var instance = this;
+
+        instance._uiSetName(event.newVal + "<br>" + instance.get('guard'));
+
+        console.log(event.newVal);
+
+        instance.draw();
+
+      };
+
+      CustomConnector.prototype._afterGuardChange = function(event) {
+
+        var instance = this;
+
+        instance._uiSetName(instance.get('name') + "<br>" + event.newVal);
+
+        instance.draw();
+
+      };
+
+      CustomConnector.prototype._uiSetName = function(val) {
+        var instance = this;
+
+        instance.get('nodeName').html(val);
+      };
+
 
       CustomConnector.prototype.getPropertyModel = function() {
           var instance = this;
 
-          return [
-              {
-                  attributeName: 'testAttr',
-                  editor: new Y.TextCellEditor(),
-                  name: 'Test Attr'
-              }
-          ];
-      }; */
+          //console.log(instance);
 
-      //Y.Base.mix(Y.Connector, [CustomConnector]);
+          return [
+            {
+
+              attributeName: 'name',
+                  editor: new Y.TextCellEditor(),
+                  name: 'Name'
+            },
+
+            {
+              attributeName: 'guard',
+              editor: new Y.TextCellEditor(),
+              name: 'Guard'
+            }
+          ];
+
+          return model;
+      };
+
+      Y.Base.mix(Y.Connector, [CustomConnector]);
 
 
 
@@ -132,7 +259,7 @@
         var diagramBuilder = new Y.DiagramBuilder({
             availableFields: availableFields,
             boundingBox: '#diagramBuilder',
-            //connector: CustomConnector,
+            connector: CustomConnector,
         }).render();
 
 
