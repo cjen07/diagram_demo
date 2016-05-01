@@ -7,6 +7,9 @@
       .diagram-node-location .diagram-node-content {
         background: url(./task.png) no-repeat scroll center transparent;
       }
+      .diagram-node-label .diagram-node-content {
+        background: url(./state.png) no-repeat scroll center transparent;
+      }
 
 
     </style>
@@ -14,8 +17,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title></title>
-    <script src="http://cdn.alloyui.com/3.0.1/aui/aui-min.js"></script>
-    <link href="http://cdn.alloyui.com/3.0.1/aui-css/css/bootstrap.min.css" rel="stylesheet"></link>
+
+    <link rel="stylesheet" href="../alloy-3.0.1/build/aui-css/css/bootstrap.css">
+    <script src="../alloy-3.0.1/build/aui/aui.js"></script>
+    <script src="./escodegen.browser.min.js"></script>
+    <script src="./esprima.js"></script>
 </head>
 <body>
     <div id="myDiagramContainer">
@@ -23,22 +29,179 @@
       <div id="flow chart editor"></div>
       <button id="getJSON">Get JSON</button>
       <button id="loadJSON">Load JSON</button>
+      <button id="clear">Clear View</button>
     </div>
     <script>
 
+    var automata;
 
-    function click() {
+    // and/or &&/|| are both supported instead of symbols
+    // -- is not supported
+    // ceil floor are supported instead of symbols
 
-      var field = diagramBuilder.toJSON();
-      console.log(JSON.stringify(field));
+    function A2B(object){
+      if (object == null)
+        return;
+      if (object.op != null){
+        if (object.op == "?:"){
+          var args = object.args;
+          if (args.length != 3){
+            console.log("wrong");
+            return;
+          }
+          return {type: "ConditionalExpression",
+                  test: A2B(args[0]),
+                  consequent: A2B(args[1]),
+                  alternate: A2B(args[2]),
+                  operator: object.op};
+        }
+        else if(object.op == "!"){
+          var args = object.args;
+          if (args.length != 1){
+            console.log("wrong");
+            return;
+          }
+          return {type: "UnaryExpression", 
+                  prefix: true, 
+                  argument: A2B(args[0]),
+                  operator: object.op};
+        }
+        else if(object.op == "||" ||
+                object.op == "&&" ||
+                object.op == "or" ||
+                object.op == "and" ){
+          var args = object.args;
+          if (args.length != 2){
+            console.log("wrong");
+            return;
+          }
+          if (object.op == "or")
+            object.op = "||";
+          if (object.op == "and")
+            object.op = "&&";
+          return {type: "LogicalExpression",
+                  left: A2B(args[0]),
+                  right: A2B(args[1]),
+                  operator: object.op};
+        }
+        else if(object.op == "="){
+          var args = object.args;
+          if (args.length != 2){
+            console.log("wrong");
+            return;
+          }
+          return {type: "AssignmentExpression",
+                  left: A2B(args[0]),
+                  right: A2B(args[1]),
+                  operator: object.op};
+        }
+        else if(object.op == "<" ||
+                object.op == "<=" ||
+                object.op == ">" ||
+                object.op == ">=" ||
+                object.op == "+" ||
+                object.op == "-" ||
+                object.op == "*" ||
+                object.op == "/" ||
+                object.op == "%" ){
+          var args = object.args;
+          if (args.length != 2){
+            console.log("wrong");
+            return;
+          }
+          return {type: "BinaryExpression",
+                  left: A2B(args[0]),
+                  right: A2B(args[1]),
+                  operator: object.op};
+        }
+        else if(object.op == "min" ||
+                object.op == "max" ||
+                object.op == "abs" ||
+                object.op == "sgn" ||
+                object.op == "trc" ||
+                object.op == "ceil" ||
+                object.op == "floor" ||
+                object.op == "pow" ||
+                object.op == "exp" ||
+                object.op == "log" ){
+          return {type: "CallExpression",
+                  callee: {name: object.op, type: "Identifier"},
+                  arguments: object.args.map(function(e){return A2B(e);})};
+        }
 
+      }
+      else if (typeof(object) == "string"){
+        return {name: object, type: "Identifier"};
+      }
+      else if (typeof(object) == "number" || typeof(object) == "boolean"){
+        return {value: object, type: "Literal", raw: object.toString()};
+      }
+      else{
+        console.log("sth wrong");
+      }
     }
+
+    function B2A(object){
+      if(object.type == "Literal"){
+        return object.value;
+      }
+      else if (object.type == "Identifier"){
+        return object.name;
+      }
+      else if (object.type == "ConditionalExpression"){
+        return {op: "?:",
+                args: [B2A(object.test),
+                       B2A(object.consequent),
+                       B2A(object.alternate)]};
+      }
+      else if (object.type == "UnaryExpression"){
+        return {op: object.operator,
+                args: [B2A(object.argument)]};
+      }
+      else if (object.type == "LogicalExpression" || 
+               object.type == "AssignmentExpression" ||
+               object.type == "BinaryExpression"){
+        var op = object.operator;
+        if (op == "&&")
+          op = "and";
+        if (op == "||")
+          op = "or";
+        return {op: op,
+                args: [B2A(object.left),
+                       B2A(object.right)]};
+      }
+      else if (object.type == "CallExpression"){
+        return {op: object.callee.name,
+                args: object.arguments.map(function(e){return B2A(e);})};
+      }
+      else{
+        console.log("sth wrong");
+      }
+    }
+
+    function A2C(object){
+      if ((m = A2B(object)) == null)
+        return "";
+      var str = escodegen.generate(m);
+      str = str.replace("||", "or");
+      str = str.replace("&&", "and");
+      return str;
+    }
+    function C2A(string){
+      var str = string;
+      str = str.replace("and", "&&");
+      str = str.replace("or", "||");
+      return B2A(esprima.parse(str).body[0].expression);
+    }
+
+    // console.log(C2A("r=min(1,2,pow(!c,d or 2))"));
+    // console.log(A2C(C2A("r=min(1,2,pow(!c,d or 2))")));
 
 
     YUI({ filter:'raw' }).use('aui-diagram-builder', function(Y) {
 
 
-    Y.DiagramNodeCustom = Y.Component.create({
+    Y.DiagramNodeLocation = Y.Component.create({
 
         NAME: 'diagram-node',
 
@@ -46,11 +209,13 @@
             type: {
                 value: 'location'
             },
-            invariant1: {
-                validator: Y.Lang.isString,
-                value: ''
-            },
-            invariant2: {
+            // width:{
+            //   value: 60
+            // },
+            // height:{
+            //   value: 60
+            // },
+            invariants: {
                 validator: Y.Lang.isString,
                 value: ''
             }
@@ -60,21 +225,14 @@
 
         prototype: {
 
-        // hotPoints: [[5, 5], [10, 5], [15, 5], [20, 5], [25, 5], [30, 5], [35, 5], [40, 5], [50, 5], [55, 5], [60, 5], [75, 5], [80, 5], [
-        //               85, 5], [85, 10], [85, 15], [85, 20], [85, 25], [85, 30], [85, 35], [85, 40], [85, 45], [85, 50], [85,              55], [85, 60], [75, 60], [70, 60], [75, 60], [60, 60], [55, 60], [50, 60], [45, 60], [40, 60], [35, 60], [30, 60], [25, 60], [
-        //               20, 60], [15, 60], [10, 60], [5, 60], [5, 55], [5, 50], [5, 45], [5, 40], [5, 35], [5, 30], [5,
-        //               25], [5, 20], [5, 15], [5, 10]],
-
           initializer: function () {
-            this.SERIALIZABLE_ATTRS.push('invariant1');
-            this.SERIALIZABLE_ATTRS.push('invariant2');
+            this.SERIALIZABLE_ATTRS.push('invariants');
 
             var instance = this;
 
             instance.on({
               nameChange: instance._onNameChange,
-              invariant1Change: instance._onInvariant1Change,
-              invariant2Change: instance._onInvariant2Change
+              invariantsChange: instance._onInvariantsChange
             });
           },
 
@@ -94,12 +252,8 @@
                 model.splice(pos, 1);
 
                 model.push({
-                    attributeName: 'invariant1',
-                    name: 'Invariant1'
-                });
-                model.push({
-                    attributeName: 'invariant2',
-                    name: 'Invariant2'
+                    attributeName: 'invariants',
+                    name: 'Invariants'
                 });
 
                 return model;
@@ -120,11 +274,9 @@
 
             instance.labelNode = Y.Node.create(
               Y.Lang.sub(instance.LABEL_TEMPLATE, {
-                label: (instance.get('name') + "<br>" + instance.get('invariant1') + "<br>" + instance.get('invariant2'))
+                label: (instance.get('name') + "<br>" + instance.get('invariants') )
               })
             );
-
-            //console.log(instance.labelNode.getHTML());
 
             instance.get('contentBox').prepend(instance.labelNode);
           },
@@ -136,25 +288,113 @@
             boundingBox.setAttribute('data-nodeId', Y.Escape.html(Y.DiagramNode.buildNodeId(val)));
 
             if (instance.get('rendered')) {
-              instance.labelNode.setContent(val + "<br>" + instance.get('invariant1') + "<br>" + instance.get('invariant2'));
+              instance.labelNode.setContent(val + "<br>" + instance.get('invariants') );
             }
           },
 
-          _onInvariant1Change: function(event) {
+          _onInvariantsChange: function(event) {
             var instance = this;
-            instance.labelNode.setContent(instance.get('name') + "<br>" + event.newVal + "<br>" + instance.get('invariant2'));
+            instance.labelNode.setContent(instance.get('name') + "<br>" + event.newVal);
+          },
+          connectOverTarget: function() {
+              var instance = this;
+              var builder = instance.get('builder');
+
+
+              builder.publishedTarget = instance;
+
+          }
+
+        }
+    });
+
+    Y.DiagramBuilder.types['location'] = Y.DiagramNodeLocation;
+
+
+
+        Y.DiagramNodeLabel = Y.Component.create({
+
+        NAME: 'diagram-node',
+
+        ATTRS: {
+            type: {
+                value: 'label'
+            }
+        },
+
+        EXTENDS: Y.DiagramNodeState,
+
+        prototype: {
+
+          initializer: function () {
+
+            var instance = this;
+
+            instance.on({
+              nameChange: instance._onNameChange
+            });
           },
 
-          _onInvariant2Change: function(event) {
+
+            getPropertyModel: function () {
+                var instance = this;
+
+                var model = Y.DiagramNodeTask.superclass.getPropertyModel.apply(instance, arguments);
+
+                var pos = model.map(function(e){return e.name;}).indexOf("Description");
+
+                model.splice(pos, 1);
+
+
+                var pos = model.map(function(e){return e.name;}).indexOf("Type");
+
+                model.splice(pos, 1);
+
+                var pos = model.map(function(e){return e.name;}).indexOf("Name");
+
+                model.splice(pos, 1);
+
+                return model;
+            },
+
+          _afterRender: function() {
             var instance = this;
-            instance.labelNode.setContent(instance.get('name') + "<br>" + instance.get('invariant1') + "<br>" + event.newVal);
+
+            instance.setStdModContent(Y.WidgetStdMod.BODY, '', Y.WidgetStdMod.AFTER);
+            instance._renderGraphic();
+            instance._renderControls();
+            instance._renderLabel();
+            instance._uiSetHighlighted(instance.get('highlighted'));
+          },
+
+          _renderLabel: function() {
+            var instance = this;
+
+            instance.labelNode = Y.Node.create(
+              Y.Lang.sub(instance.LABEL_TEMPLATE, {
+                label: ("")
+              })
+            );
+
+            instance.get('contentBox').prepend(instance.labelNode);
+          },
+
+          _uiSetName: function(val) {
+            var instance = this;
+            var boundingBox = instance.get('boundingBox');
+
+            boundingBox.setAttribute('data-nodeId', Y.Escape.html(Y.DiagramNode.buildNodeId(val)));
+
+            if (instance.get('rendered')) {
+              instance.labelNode.setContent("");
+            }
           }
 
 
         }
     });
 
-    Y.DiagramBuilder.types['location'] = Y.DiagramNodeCustom;
+    Y.DiagramBuilder.types['label'] = Y.DiagramNodeLabel;
 
 
 
@@ -165,17 +405,51 @@
                 type: 'location'
             },
             {
-              iconClass: 'diagram-node-fork-icon',
-              label: 'Fork',
-              type: 'fork'
+              iconClass: 'diagram-node-state-icon',
+              label: 'Label',
+              type: 'label'
             }
         ];
+
+
+
+///           connectors
 
       var CustomConnector = function() {
       };
 
       CustomConnector.ATTRS = {
+        type: {
+              valueFn: function() {
+                  return '';
+              }
+          },
+        action: {
+              valueFn: function() {
+                  return '';
+              }
+          },
+          rate: {
+              valueFn: function() {
+                  return '';
+              }
+          },
           guard: {
+              valueFn: function() {
+                  return '';
+              }
+          },          
+          probability: {
+              valueFn: function() {
+                  return '';
+              }
+          },
+          assignments: {
+              valueFn: function() {
+                  return '';
+              }
+          },
+          rewards: {
               valueFn: function() {
                   return '';
               }
@@ -185,13 +459,24 @@
       CustomConnector.prototype.initializer = function() {
           var instance = this;
 
-          if (instance.SERIALIZABLE_ATTRS.indexOf('guard') == -1)
+          var attrs = ["type", "action", "rate", "guard", "probability", "assignments", "rewards"];
 
-            instance.SERIALIZABLE_ATTRS.push('guard');
+          attrs.forEach(function (attr) {  
+            if (instance.SERIALIZABLE_ATTRS.indexOf(attr) == -1)
+
+              instance.SERIALIZABLE_ATTRS.push(attr);
+          });
+
 
           instance.after({
             nameChange: instance._afterNameChange,
-            guardChange: instance._afterGuardChange,
+            typeChange: instance._afterChange,
+            actionChange: instance._afterChange,
+            rateChange: instance._afterChange,
+            guardChange: instance._afterChange,
+            probabilityChange: instance._afterChange,
+            assignmentsChange: instance._afterChange,
+            rewardsChange: instance._afterChange,
             p1Change: instance.draw,
             p2Change: instance.draw,
             selectedChange: instance._afterSelectedChange,
@@ -199,27 +484,150 @@
             visibleChange: instance._afterVisibleChange
           });
 
-          instance._uiSetName(instance.get('name') + "<br>" + instance.get('guard'));
+
+          if (instance.get('type') == 1){
+            // from location to fork
+            var str = "";
+            var attrs = ["action", "rate", "guard"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+            if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
+
+          else if (instance.get('type') == 2){
+            // from fork to location
+            var str = "";
+            var attrs = ["probability", "assignments", "rewards"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+              if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
+
+          else if (instance.get('type') == 3){
+            var str = "";
+            var attrs = ["action", "rate", "guard", "probability", "assignments", "rewards"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+            if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
+          else {
+            instance._uiSetName("null");
+          }
+
+          
       };
 
 
-      CustomConnector.prototype._afterNameChange = function(event) {
+      // CustomConnector.prototype._afterNameChange = function(event) {
+
+      //   var instance = this;
+
+      //   instance._uiSetName(event.newVal + "<br>" + instance.get('guard'));
+
+      //   console.log(event.newVal);
+
+      //   instance.draw();
+
+      // };
+
+      CustomConnector.prototype._afterChange = function(event) {
 
         var instance = this;
 
-        instance._uiSetName(event.newVal + "<br>" + instance.get('guard'));
+         if (instance.get('type')  == 1){
+            // from location to fork
+            var str = "";
+            var attrs = ["action", "rate", "guard"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+            if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
 
-        console.log(event.newVal);
+          else if (instance.get('type')  == 2){
+            // from fork to location
+            var str = "";
+            var attrs = ["probability", "assignments", "rewards"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+            if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
 
-        instance.draw();
-
-      };
-
-      CustomConnector.prototype._afterGuardChange = function(event) {
-
-        var instance = this;
-
-        instance._uiSetName(instance.get('name') + "<br>" + event.newVal);
+          else if (instance.get('type')  == 3){
+            var str = "";
+            var attrs = ["action", "rate", "guard", "probability", "assignments", "rewards"];
+            attrs.forEach(function (attr) {
+              var name = instance.get(attr);
+              if (name != ""){
+                if (str != ""){
+                  str += "<br>";
+                }
+                str += attr;
+                str += ": ";
+                str += name;
+              }
+            });
+            if (str == "")
+              str = "null";
+            instance._uiSetName(str);
+          }
+          else{
+            instance._uiSetName("null");
+          }
 
         instance.draw();
 
@@ -235,24 +643,105 @@
       CustomConnector.prototype.getPropertyModel = function() {
           var instance = this;
 
-          //console.log(instance);
+          if (instance.get('type') == 1){
+            console.log("sss");
+            return [
+                          {
+                            attributeName: 'type',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Type'
+                          },
+                          {
+                            attributeName: 'action',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Action'
+                          },
+                          {
+                            attributeName: 'rate',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Rate'
+                          },
+                          {
+                            attributeName: 'guard',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Guard'
+                          }
+                        ];
+          }
 
-          return [
-            {
+          else if (instance.get('type')  == 2){
+            return [
+                          {
+                            attributeName: 'type',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Type'
+                          },
+                          {
+                            attributeName: 'probability',
+                                editor: new Y.TextCellEditor(),
+                                name: 'Probability'
+                          },
+                          {
+                            attributeName: 'assignments',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Assignments'
+                          },
+                          {
+                            attributeName: 'rewards',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Rewards'
+                          }
+                        ];
+          }
+          else if (instance.get('type') == 3){
+            return [
+                          {
+                            attributeName: 'type',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Type'
+                          },
+                          {
+                            attributeName: 'action',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Action'
+                          },
+                          {
+                            attributeName: 'rate',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Rate'
+                          },
+                          {
+                            attributeName: 'guard',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Guard'
+                          },
+                          {
+                            attributeName: 'probability',
+                                editor: new Y.TextCellEditor(),
+                                name: 'Probability'
+                          },
+                          {
+                            attributeName: 'assignments',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Assignments'
+                          },
+                          {
+                            attributeName: 'rewards',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Rewards'
+                          }
+                        ];
+          }
+          else{
+                      return [
+                          {
+                            attributeName: 'type',
+                            editor: new Y.TextCellEditor(),
+                            name: 'Type'
+                          }
+                      ];
+          }
 
-              attributeName: 'name',
-                  editor: new Y.TextCellEditor(),
-                  name: 'Name'
-            },
-
-            {
-              attributeName: 'guard',
-              editor: new Y.TextCellEditor(),
-              name: 'Guard'
-            }
-          ];
-
-          return model;
       };
 
       Y.Base.mix(Y.Connector, [CustomConnector]);
@@ -266,12 +755,120 @@
             connector: CustomConnector,
         }).render();
 
+    Y.one('#clear').on(
+          'click',
+
+      function (event) {
+        var builder = document.getElementById("diagramBuilder");   
+        builder.removeChild(builder.childNodes[0]);
+        diagramBuilder = new Y.DiagramBuilder({
+            availableFields: availableFields,
+            boundingBox: '#diagramBuilder',
+            connector: CustomConnector,
+            fields: [],
+            render: true
+        }).render();
+
+        diagramBuilder.connectAll([]);
+      }
+    );
 
     Y.one('#getJSON').on(
           'click',
 
       function (event) {
-          console.log('JSON: ' + JSON.stringify(diagramBuilder.toJSON()));
+          var object = diagramBuilder.toJSON();
+
+          console.log(object);
+
+          var locations = [];
+          var edges = [];
+
+          object.nodes.forEach(function(node){
+            if (node.type == "location"){
+              locations.push({name: node.name,
+                              invariants: node.invariants == "" ? null : C2A(node.invariants),
+                              x: node.xy[0],
+                              y: node.xy[1]
+                              });
+              node.transitions.forEach(function(transition){
+                if (transition.target.split("_")[0] == "label"){
+                  var pos = edges.map(function(e){return e.label}).indexOf(transition.target);
+                  if (pos == -1){
+                    edges.push({label: transition.target,
+                                location: node.name,
+                                sourceXY: transition.sourceXY,
+                                targetXY: transition.targetXY,
+                                action: transition.connector.action,
+                                rate: transition.connector.rate == "" ? null : C2A(transition.connector.rate),
+                                guard: transition.connector.guard == "" ? null : C2A(transition.connector.guard),
+                                destinations: []
+                                });
+                  }
+                  else{
+                    edges[pos].location = node.name;
+                    edges[pos].sourceXY = transition.sourceXY;
+                    edges[pos].targetXY = transition.targetXY;
+                    edges[pos].action = transition.connector.action;
+                    edges[pos].rate = transition.connector.rate == "" ? null : C2A(transition.connector.rate);
+                    edges[pos].guard = transition.connector.guard == "" ? null : C2A(transition.connector.guard);
+                    edges[pos].destinations = [];
+                  }
+                }
+                else {
+                  edges.push({location: node.name,
+                              action: transition.connector.action,
+                              rate: transition.connector.rate == "" ? null : C2A(transition.connector.rate),
+                              guard: transition.connector.guard == "" ? null : C2A(transition.connector.guard),
+                              destinations: [{location: transition.target,
+                                              sourceXY: transition.sourceXY,
+                                              targetXY: transition.targetXY,
+                                              probability: transition.connector.probability == "" ? null : C2A(transition.connector.probability),
+                                              assignments: transition.connector.assignments == "" ? null : transition.connector.assignments.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};}),
+                                              rewards: transition.connector.rewards == "" ? null : transition.connector.rewards.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};})
+                                            }]
+                              });
+                }
+              });
+            }
+            else if (node.type == "label"){
+              node.transitions.forEach(function(transition){
+                var pos = edges.map(function(e){return e.label}).indexOf(transition.source);
+                if (pos == -1){
+                  edges.push({label: transition.source,
+                              x: node.xy[0],
+                              y: node.xy[1],
+                              destinations: [{location: transition.target,
+                                              sourceXY: transition.sourceXY,
+                                              targetXY: transition.targetXY,
+                                              probability: transition.connector.probability == "" ? null : C2A(transition.connector.probability),
+                                              assignments: transition.connector.assignments == "" ? null : transition.connector.assignments.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};}),
+                                              rewards: transition.connector.rewards == "" ? null : transition.connector.rewards.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};})
+                                            }]});
+                }
+                else{
+                  edges[pos].x = node.xy[0];
+                  edges[pos].y = node.xy[1];
+                  edges[pos].destinations.push({location: transition.target,
+                                                sourceXY: transition.sourceXY,
+                                                targetXY: transition.targetXY,
+                                                probability: transition.connector.probability == "" ? null : C2A(transition.connector.probability),
+                                                assignments: transition.connector.assignments == "" ? null : transition.connector.assignments.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};}),
+                                                rewards: transition.connector.rewards == "" ? null : transition.connector.rewards.split(",").map(function(e){return {ref:e.split("' =")[0], value:C2A(e.split("' =")[1])};})
+                                                });
+                }
+              });
+            }
+          });
+
+          edges.forEach(function(edge){
+            edge.label = null;
+          });
+
+          automata = {locations: locations, edges: edges};
+
+          console.log(automata);
+          console.log("get data");
       });
 
 
@@ -283,93 +880,493 @@
         var builder = document.getElementById("diagramBuilder");   
         builder.removeChild(builder.childNodes[0]);
 
-        var automata = {};         
+        if (automata == null){
+          console.log("load data");
+        automata = 
+    {
+      "locations" : [
+        {
+          "name" : "s0",
+          "x": 100,
+          "y": 100
+        },
+        {
+          "name" : "s1",
+          "x": 100,
+          "y": 200
+        },
+        {
+          "name" : "s2",
+          "x": 100,
+          "y": 300
+        },
+        {
+          "name" : "s3",
+          "x": 100,
+          "y": 400
+        },
+        {
+          "name" : "s4",
+          "x": 200,
+          "y": 100
+        },
+        {
+          "name" : "s5",
+          "x": 200,
+          "y": 200
+        },
+        {
+          "name" : "s6",
+          "x": 200,
+          "y": 300
+        },
+        {
+          "name" : "s7",
+          "x": 200,
+          "y": 400
+        }
+      ],
+      "edges" : [
+        {
+          "location" : "s0",
+          "action": "act",
+          "x": 150,
+          "y": 150,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : {
+            "op": "and",
+            "args": [
+              true,
+              {
+                "op": "or",
+                "args": [false, false]
+              }               
+            ]
+          },
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15], 
+              "probability" : {
+                "op": "+",
+                "args": [0.5, "x"]
+              },
+              "location" : "s1",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s2",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s1",
+          "x": 150,
+          "y": 250,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15], 
+              "probability" : 0.5,
+              "location" : "s3",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s4",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s2",
+          "x": 150,
+          "y": 350,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s5",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s6",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s3",
+          "x": 250,
+          "y": 150,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s1",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 1
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s4",
+          "x": 250,
+          "y": 250,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,5],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 2
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,60],
+              "targetXY": [5,60],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 3
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s5",
+          "x": 250,
+          "y": 350,
+          "sourceXY": [60,5],
+          "targetXY": [5,5],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,5],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 4
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,60],
+              "targetXY": [5,60],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 5
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s6",
+          "x": 350,
+          "y": 150,
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s2",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            },
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 0.5,
+              "location" : "s7",
+              "assignments" : [
+                {
+                  "ref" : "d",
+                  "value" : 6
+                },
+                {
+                  "ref" : "thrownSix",
+                  "value" : true
+                },
+                {
+                  "ref" : "terminated",
+                  "value" : true
+                }
+              ],
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "location" : "s7",
+          "sourceXY": [5,5],
+          "targetXY": [5,15],
+          "guard" : true,
+          "destinations" : [
+            {
+              "sourceXY": [60,5],
+              "targetXY": [5,15],
+              "probability" : 1,
+              "location" : "s7",
+              "rewards" : [
+                {
+                  "ref" : "step",
+                  "value" : 1
+                }
+              ]
+            }
+          ]
+        } 
+      ]
+    };
+    }   
+    else{
+      console.log("flash data");
+    }
+
+    //console.log(automata);
+
+    var locations = automata.locations;
+    var edges = automata.edges;
+
+    var fields = [];
+    var connectors = [];
+
+    locations.forEach(function(location){
+      fields.push({
+        name: location.name,
+        type: "location",
+        invariants: location.invariants == null ? "" : A2C(location.invariants),
+        xy: [location.x, location.y]
+      });
+    });
+
+    var label_index = 0;
+    var link_index = 0;
+
+    edges.forEach(function(edge){
+    
+      if (edge.destinations.length == 1){
+        connectors.push({
+          connector: {
+            type: 3,
+            name: "link_" + link_index,
+            action: edge.action == null ? "" : edge.action,
+            rate: A2C(edge.rate),
+            guard: A2C(edge.guard),
+            probability: A2C(edge.destinations[0].probability),
+            assignments: edge.destinations[0].assignments == null ? "" : edge.destinations[0].assignments.map(function(e){return e.ref + "' = " + A2C(e.value)}).toString(),
+            rewards: edge.destinations[0].rewards == null ? "" : edge.destinations[0].rewards.map(function(e){return e.ref + "' = " + A2C(e.value)}).toString()
+          },
+          source: edge.location,
+          target: edge.destinations[0].location,
+          sourceXY: edge.destinations[0].sourceXY,
+          targetXY: edge.destinations[0].targetXY
+        });
+        ++ link_index;
+        return;
+      }
+
+      edge.name = "label_" + label_index;
+      ++ label_index; 
+      fields.push({
+        name: edge.name,
+        type: "label",
+        xy: [edge.x, edge.y]
+      });
+
+      connectors.push({
+        connector: {
+          type: 1,
+          name: "link_" + link_index,
+          action: edge.action == null ? "" : edge.action,
+          rate: A2C(edge.rate),
+          guard: A2C(edge.guard)
+        },
+        source: edge.location,
+        target: edge.name,
+        sourceXY: edge.sourceXY,
+        targetXY: edge.targetXY
+      });
+      ++ link_index;
+
+      edge.destinations.forEach(function(destination){
+        connectors.push({
+          connector: {
+            type: 2,
+            name: "link_" + link_index,
+            probability: A2C(destination.probability),
+            assignments: destination.assignments == null ? "" : destination.assignments.map(function(e){return e.ref + "' = " + A2C(e.value)}).toString(),
+            rewards: destination.rewards == null ? "" : destination.rewards.map(function(e){return e.ref + "' = " + A2C(e.value)}).toString()
+          },
+          source: edge.name,
+          target: destination.location,
+          sourceXY: destination.sourceXY,
+          targetXY: destination.targetXY
+        });
+        ++ link_index;
+      });
+    });
+
+
+
+    // console.log(fields);
+    // console.log(connectors);
         
-        var diagramBuilder = new Y.DiagramBuilder({
+        diagramBuilder = new Y.DiagramBuilder({
             availableFields: availableFields,
             boundingBox: '#diagramBuilder',
             connector: CustomConnector,
-            fields: [
-                {
-                    // transitions: [
-                    //     'Task1',
-                    //     { target: 'Task0' }
-                    // ],
-                    name: 'Start0',
-                    type: 'start',
-                    xy: [10, 10]
-                },
-                {
-                    name: 'Condition0',
-                    type: 'condition',
-                    xy: [100, 100]
-                },
-                {
-                    name: 'State0',
-                    type: 'state',
-                    xy: [250, 100]
-                },
-                {
-                    name: 'Join0',
-                    type: 'join',
-                    xy: [100, 300]
-                },
-                {
-                    name: 'Task0',
-                    type: 'task',
-                    xy: [400, 100]
-                },
-                {
-                    name: 'Fork0',
-                    type: 'fork',
-                    xy: [400, 300]
-                },
-                {
-                    name: 'EndNode0',
-                    type: 'end',
-                    xy: [600, 10]
-                }
-            ],
+            fields: fields,
             render: true
         }).render();
 
-        diagramBuilder.connectAll([
-            {
-                connector: { name: 'Link0' },
-                source: 'Start0',
-                target: 'Condition0'
-            },
-            {
-                connector: { name: 'Link1' },
-                source: 'Condition0',
-                target: 'State0'
-            },
-            {
-                connector: { name: 'Link2' },
-                source: 'State0',
-                target: 'Join0'
-            },
-            {
-                connector: { name: 'Link3' },
-                source: 'Join0',
-                target: 'Task0'
-            },
-            {
-                connector: { name: 'Link4' },
-                source: 'Task0',
-                target: 'Fork0'
-            },
-            {
-                connector: { name: 'Link5' },
-                source: 'Fork0',
-                target: 'EndNode0'
-            },
-            {   
-                connector: { name: 'Link6' },
-                source: 'State0',
-                target: 'EndNode0'
-            }
-        ]);
+        diagramBuilder.connectAll(connectors);
 
 
 
